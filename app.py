@@ -24,7 +24,10 @@ import analise
 # recarrega o módulo de cálculo a cada execução completa: evita usar uma versão antiga
 # que ficou na memória quando os arquivos são atualizados com o app aberto
 analise = importlib.reload(analise)
-from coletor import Coletor, PASTA, TZ
+from coletor import Coletor, PASTA
+from zoneinfo import ZoneInfo
+
+TZ = ZoneInfo("America/Sao_Paulo")  # definido aqui: não depende da versão do coletor.py no GitHub
 
 st.set_page_config(page_title="Apuração 2º Turno 2026", layout="wide", initial_sidebar_state="expanded")
 st.markdown("<style>.block-container{padding-top:3.5rem;padding-bottom:0;max-width:1300px}</style>",

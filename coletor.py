@@ -25,6 +25,9 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
+from zoneinfo import ZoneInfo
+
+TZ = ZoneInfo("America/Sao_Paulo")  # o servidor na nuvem roda em UTC
 
 BASE = os.environ.get("MONITOR_BASE", "https://resultados.tse.jus.br").rstrip("/")
 AMBIENTE = "oficial"
@@ -185,7 +188,7 @@ class Coletor:
         if not self.eleicao:
             self.eleicao = self.detectar_eleicao()
             log.info("Eleição detectada: %s (%s)", self.eleicao, self.nome_eleicao)
-        agora = datetime.now().isoformat(timespec="seconds")
+        agora = datetime.now(TZ).replace(tzinfo=None).isoformat(timespec="seconds")  # horário de Brasília
         novos, erros = [], []
         for uf in UFS:
             h = {}
