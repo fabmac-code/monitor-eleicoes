@@ -24,7 +24,7 @@ import analise
 # recarrega o módulo de cálculo a cada execução completa: evita usar uma versão antiga
 # que ficou na memória quando os arquivos são atualizados com o app aberto
 analise = importlib.reload(analise)
-from coletor import Coletor, PASTA
+from coletor import Coletor, PASTA, TZ
 
 st.set_page_config(page_title="Apuração 2º Turno 2026", layout="wide", initial_sidebar_state="expanded")
 st.markdown("<style>.block-container{padding-top:3.5rem;padding-bottom:0;max-width:1300px}</style>",
@@ -40,9 +40,57 @@ def config(nome: str, padrao: str) -> str:
     return os.environ.get(nome, padrao)
 
 
-MODOS = {"2º turno (TSE, automático)": {"modo": "2t", "eleicao": None, "base": None, "db": "apuracao.db"}}
+MODOS = {"2t": {"modo": "2t", "eleicao": None, "base": None, "db": "apuracao.db",
+               "titulo": "2º turno 2026", "tag": ":green-badge[AO VIVO]",
+               "desc": "Dados oficiais do TSE, coletados automaticamente."}}
 if config("MOSTRAR_TESTE", "1") == "1":
-    MODOS["Teste: 1º turno 2026 (TSE)"] = {"modo": "teste", "eleicao": "6257", "base": None, "db": "apuracao_teste.db"}
+    MODOS["teste"] = {"modo": "teste", "eleicao": "6257", "base": None, "db": "apuracao_teste.db",
+                      "titulo": "1º turno 2026", "tag": ":gray-badge[TESTE]",
+                      "desc": "Resultado final do TSE. Serve para testar a tela."}
+BASES = {"1T 2026": ("2026", "1º turno"), "2022": ("2022", "2º turno"),
+         "2018": ("2018", "2º turno"), "2014": ("2014", "2º turno")}
+CSS_BARRA = """<style>
+section[data-testid="stSidebar"] h1{font-size:1.6rem;margin-bottom:.2rem}
+.passo{font-size:.74rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#7c8882;margin:1.1rem 0 .35rem}
+/* 1 · fontes como cartões (DOM do Streamlit >= 1.4x: radiogroup > div[data-selected] > label) */
+.st-key-fonte [role="radiogroup"]{gap:8px;width:100%}
+.st-key-fonte [role="radiogroup"] > div, .st-key-fonte [role="radiogroup"] > label{border:1px solid #dfe3df;border-radius:10px;
+  padding:10px 12px;margin:0;background:#fff;width:100%;box-sizing:border-box}
+.st-key-fonte [role="radiogroup"] > div[data-selected="true"], .st-key-fonte [role="radiogroup"] > label:has(input:checked){
+  border-color:#e5484d;box-shadow:0 0 0 1px #e5484d}
+/* 2 · bases em grade 2×2, sem a bolinha do rádio */
+.st-key-base, .st-key-base [data-testid="stRadio"], .st-key-base [data-testid="stRadio"] > div{width:100%!important}
+.st-key-base [role="radiogroup"]{display:grid!important;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+.st-key-base [role="radiogroup"] > div{width:100%}
+.st-key-base [role="radiogroup"] > div, .st-key-base [role="radiogroup"] > label{border:1px solid #dfe3df;border-radius:8px;
+  padding:8px 4px;margin:0;background:#fff;box-sizing:border-box;cursor:pointer}
+.st-key-base [data-testid="stRadioOption"], .st-key-base [data-testid="stRadioOption"] > div{width:100%;justify-content:center}
+.st-key-base [data-testid="stRadioOption"] > div > div:first-child{display:none}
+.st-key-base p{text-align:center;line-height:1.25;margin:0}
+.st-key-base [role="radiogroup"] > div[data-selected="true"], .st-key-base [role="radiogroup"] > label:has(input:checked){
+  background:#e5484d;border-color:#e5484d}
+.st-key-base [role="radiogroup"] > div[data-selected="true"] p, .st-key-base [role="radiogroup"] > label:has(input:checked) p{color:#fff}
+</style>"""
+
+
+def contador_html(ultima: str | None, intervalo: int = 60) -> str:
+    """Contagem regressiva até a próxima coleta (roda no navegador; ressincroniza a cada atualização)."""
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(ultima) if ultima else None
+        agora = datetime.now(TZ).replace(tzinfo=None)  # servidor em UTC; a coleta grava horário de Brasília
+        resta = max(0, intervalo - int((agora - dt).total_seconds())) if dt else intervalo
+        hora = dt.strftime("%H:%M:%S") if dt else "aguardando"
+    except ValueError:
+        resta, hora = intervalo, "—"
+    return f"""<div style="font-family:'Source Sans Pro',system-ui,sans-serif;font-size:12.5px;color:#31333f">
+<div style="display:flex;justify-content:space-between;align-items:baseline">
+<b id="t" style="white-space:nowrap">Próxima em {resta} s</b><span style="color:#7c8882;white-space:nowrap">última {hora}</span></div>
+<div style="height:4px;background:#eceeeb;border-radius:2px;margin-top:6px;overflow:hidden">
+<div id="b" style="height:100%;width:{100*resta/intervalo:.0f}%;background:#e5484d;transition:width 1s linear"></div></div></div>
+<script>let r={resta},T={intervalo};setInterval(()=>{{r=r>0?r-1:T;
+document.getElementById('t').textContent=r>0?'Próxima em '+r+' s':'Coletando…';
+document.getElementById('b').style.width=(100*r/T)+'%';}},1000);</script>"""
 TEMPLATE = (PASTA / "template.html").read_text(encoding="utf-8")
 
 
@@ -69,19 +117,41 @@ def ultimo_disparo() -> dict:
 
 
 with st.sidebar:
-    st.header("Monitor")
-    nome = st.radio("Fonte de dados", list(MODOS), index=0)
-    ano = st.radio("Comparar com", analise.ANOS, index=1, horizontal=True,
-                   format_func=lambda a: "1º turno 2026" if a == "1T 2026" else f"2º turno {a}")
-    st.divider()
-    auto = st.toggle("Atualizar a tela automaticamente", value=True,
-                     help="Desligado: a coleta continua a cada 60 s, mas a tela só muda quando você clicar em Atualizar tela.")
-    buscar = st.button("Buscar no TSE agora", use_container_width=True)
-    st.caption(f"Bases de comparação carregadas: {len(analise.ANOS)}")
-    st.caption("Coleta automática a cada 60 s (arquivos .jws do TSE). A tela confere a cada 20 s se há dado novo.")
-    st.caption("Versão online: se o app reiniciar, a curva da noite recomeça do zero; os números atuais são relidos do TSE.")
+    st.markdown(CSS_BARRA, unsafe_allow_html=True)
+    st.title("Monitor")
 
-col = coletor_para(nome)
+    st.markdown('<div class="passo">1 · O que acompanhar</div>', unsafe_allow_html=True)
+    nome = st.radio("O que acompanhar", list(MODOS), key="fonte", label_visibility="collapsed",
+                    format_func=lambda k: f"**{MODOS[k]['titulo']}** {MODOS[k]['tag']}",
+                    captions=[MODOS[k]["desc"] for k in MODOS])
+
+    st.markdown('<div class="passo">2 · Comparar com</div>', unsafe_allow_html=True)
+    # comparar o 1º turno com ele mesmo não faz sentido: a opção some quando a fonte é o 1º turno
+    opcoes = [a for a in analise.ANOS if not (MODOS[nome]["modo"] == "teste" and a == "1T 2026")]
+    if st.session_state.get("base") not in opcoes:
+        st.session_state["base"] = "2022"
+    ano = st.radio("Comparar com", opcoes, key="base", horizontal=True, label_visibility="collapsed",
+                   format_func=lambda a: f"**{BASES.get(a, (a, ''))[0]}**  \n{BASES.get(a, (a, ''))[1]}")
+    st.caption("Δ = parcial de 2026 − resultado final da base escolhida.")
+    if len(analise.ANOS) < 4:
+        st.warning(f"Só {len(analise.ANOS)} de 4 bases carregadas. Reinicie o app (menu ⋮ > Reboot app).")
+
+    col = coletor_para(nome)
+    st.markdown('<div class="passo">3 · Atualização</div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        auto = st.toggle("Atualizar automaticamente", value=True, key="auto")
+        ultima = dict(col.con.execute("SELECT chave, valor FROM status").fetchall()).get("ultima_rodada")
+        st.iframe(contador_html(ultima), height=46)
+        buscar = st.button("Buscar agora", use_container_width=True, type="secondary" if auto else "primary")
+    with st.expander("Como funciona a coleta"):
+        st.caption("O app baixa do TSE, a cada 60 s, os 29 arquivos assinados (.jws) de presidente: 27 UFs, "
+                   "exterior e Brasil. Só grava quando os números mudam. A tela confere a cada 20 s se há dado novo "
+                   "e só é redesenhada quando há. Com \"Atualizar automaticamente\" desligado, a coleta continua, mas a "
+                   "tela só muda quando você clicar em Atualizar tela. \"Buscar agora\" antecipa a próxima consulta "
+                   "(no máximo uma vez a cada 30 s, somando todos os visitantes).")
+        st.caption("Versão online: se o app reiniciar, a curva da noite recomeça do zero; os números atuais são "
+                   "relidos do TSE na hora.")
+
 if buscar:
     disp = ultimo_disparo()
     espera = 30 - (time.time() - disp.get(nome, 0))

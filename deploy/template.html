@@ -137,7 +137,7 @@ tfoot td{font-weight:600;border-top:2px solid var(--line)}
 .bf .r.out{opacity:.75;border-top:1px dashed var(--line);padding-top:3px}
 .acum{font-size:.82rem;color:var(--ink2)}
 .rg{display:flex;flex-direction:column;gap:2px;overflow-x:auto}
-.rg .r{display:grid;grid-template-columns:150px minmax(220px,1.6fr) repeat(5,minmax(86px,.6fr));gap:12px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--grid);font-size:.85rem;min-width:820px}
+.rg .r{display:grid;grid-template-columns:150px minmax(220px,1.6fr) repeat(6,minmax(86px,.6fr));gap:12px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--grid);font-size:.85rem;min-width:920px}
 .rg .r.h{font-family:var(--f-disp);font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);border-bottom:1px solid var(--line);padding-block:4px}
 .rg .r.tot{border-top:2px solid var(--line);font-weight:600}
 .rg .r:not(.h):hover{background:var(--grid)}
@@ -495,11 +495,12 @@ const REGIOES=[["N","Norte",["AC","AM","AP","PA","RO","RR","TO"]],["NE","Nordest
   ["CO","Centro-Oeste",["DF","GO","MS","MT"]],["SE","Sudeste",["ES","MG","RJ","SP"]],["S","Sul",["PR","RS","SC"]],["ZZ","Exterior",["ZZ"]]];
 function regioes(){
   const okAll=rows.filter(r=>!r.sem), Lt=okAll.reduce((a,r)=>a+r.lv,0), Ft=okAll.reduce((a,r)=>a+r.fv,0);
+  const Wt=okAll.reduce((a,r)=>a+r.lv+r.fv,0), At=Object.values(A26).reduce((a,v)=>a+v,0);
   const agg=(nome,ufs,tag)=>{let lv=0,fv=0,el=0,ab=0,ap=0,bl=0,bf=0,bap=0,bco=0;
     for(const uf of ufs){const r=rows.find(x=>x.uf===uf),h=HB[uf];ap+=A26[uf]||0;bl+=h[4];bf+=h[5];bap+=h[0];bco+=h[1];
       if(r&&!r.sem){lv+=r.lv;fv+=r.fv;el+=r.u.eleitores;ab+=r.u.abst;}}
     const lp=lv+fv?100*lv/(lv+fv):NaN,bp=100*bl/(bl+bf),abst=el?100*ab/el:NaN,bab=100*(1-bco/bap);
-    return {tag,nome,ufs,lv,fv,lp,bp,dpp:lp-bp,sl:lv-fv,apur:ap?100*el/ap:NaN,abst,dab:abst-bab,shL:Lt?100*lv/Lt:NaN,shF:Ft?100*fv/Ft:NaN};};
+    return {tag,nome,ufs,lv,fv,lp,bp,dpp:lp-bp,sl:lv-fv,apur:ap?100*el/ap:NaN,abst,dab:abst-bab,shL:Lt?100*lv/Lt:NaN,shF:Ft?100*fv/Ft:NaN,peso:Wt?100*(lv+fv)/Wt:NaN,pesoEl:At?100*ap/At:NaN};};
   const R=REGIOES.map(([t,n,u])=>agg(n,u,t)), T=agg("Brasil",REGIOES.flatMap(x=>x[2]),"BR");
   const stk=g=>isNaN(g.lp)?'<div class="stk"></div><div class="stkl"><span>sem dados</span></div>':
     `<div class="stk"><i style="width:${g.lp}%;background:var(--pt)"></i><i style="flex:1;background:var(--opp)"></i><span class="m50"></span><span class="mb" style="left:${g.bp}%" title="PT ${YL}: ${pct(g.bp,1)}%"></span></div>
@@ -508,13 +509,14 @@ function regioes(){
     <div class="nm"><b>${g.nome}</b><small>${g.tag==="BR"?"total":g.ufs.join(" · ")}</small></div>
     <div>${stk(g)}</div>
     <div class="n">${pct(g.apur,1)}%<small>apurado</small></div>
+    <div class="n">${pct(g.peso,1)}%<small style="white-space:nowrap">eleit. ${pct(g.pesoEl,1)}%</small></div>
     <div class="n"><span class="pt">${fmtM(g.lv)}</span><small>${pct(g.shL,1)}% do Lula</small></div>
     <div class="n"><span class="opp">${fmtM(g.fv)}</span><small>${pct(g.shF,1)}% do Flávio</small></div>
     <div class="n" style="color:${g.dpp>=0?"var(--pt)":"var(--opp)"}">${sgn(g.dpp)} p.p.<small>PT ${YL}: ${pct(g.bp,1)}%</small></div>
     <div class="n">${pct(g.abst,1)}%<small>Δ ${sgn(g.dab)} p.p.</small></div></div>`;
-  document.getElementById("reg").innerHTML=`<div class="r h"><div>Região</div><div>Lula × Flávio (% dos votos dos dois)</div><div class="n">Apurado</div><div class="n">Lula</div><div class="n">Flávio</div><div class="n">Δ vs ${YL}</div><div class="n">Abstenção</div></div>`
+  document.getElementById("reg").innerHTML=`<div class="r h"><div>Região</div><div>Lula × Flávio (% dos votos dos dois)</div><div class="n">Apurado</div><div class="n" title="Participação da região nos votos válidos (Lula + Flávio) já apurados; abaixo, a fatia da região no eleitorado de 2026">Peso</div><div class="n">Lula</div><div class="n">Flávio</div><div class="n">Δ vs ${YL}</div><div class="n">Abstenção</div></div>`
     +R.map(g=>linha(g)).join("")+linha(T,"tot");
-  document.getElementById("regN").textContent=`Apurado = eleitores das seções totalizadas ÷ eleitorado 2026 · Δ = % de Lula − % do PT no ${YN}`;
+  document.getElementById("regN").textContent=`Apurado = eleitores das seções totalizadas ÷ eleitorado 2026 · Peso = % dos votos válidos (Lula + Flávio) apurados no Brasil · Δ = % de Lula − % do PT no ${YN}`;
   const tipR=g=>`<b>${g.nome}</b> · ${pct(g.apur,1)}% apurado<br><span class="num">Lula ${fmt(g.lv)} (${pct(g.lp,2)}%) · Flávio ${fmt(g.fv)} (${pct(100-g.lp,2)}%)</span><br><span class="num">Saldo ${g.sl>=0?"Lula":"Flávio"} +${fmt(Math.abs(g.sl))}</span><br><span class="num">PT ${YL}: ${pct(g.bp,2)}% → Δ ${sgn(g.dpp)} p.p.</span><br><span class="num">Abstenção ${pct(g.abst,1)}% (Δ ${sgn(g.dab)} p.p.)</span>`;
   document.querySelectorAll("#reg [data-rg]").forEach(n=>{const g=n.dataset.rg==="BR"?T:R.find(x=>x.tag===n.dataset.rg);n.onmousemove=e=>tip(e,tipR(g));n.onmouseleave=untip;});
 }
