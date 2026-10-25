@@ -75,7 +75,9 @@ def ultimas(con, eleicao: str, ate: str | None = None) -> pd.DataFrame:
            ) u ON l.uf=u.uf AND l.coleta=u.mc WHERE l.eleicao=?"""
     q = q.format(f="AND coleta<=?" if ate else "")
     args = (eleicao, ate, eleicao) if ate else (eleicao, eleicao)
-    return pd.read_sql_query(q, con, params=args)
+    df = pd.read_sql_query(q, con, params=args)
+    # se dois coletores gravaram no mesmo instante, fica uma linha por UF (evita índice duplicado)
+    return df.drop_duplicates(subset="uf", keep="last").reset_index(drop=True)
 
 
 def projetar(df: pd.DataFrame, hist: dict, pesos: dict) -> tuple[float | None, float | None]:

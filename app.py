@@ -108,18 +108,29 @@ def coletores() -> dict:
     return {}
 
 
+@st.cache_resource
+def trava_coletores():
+    import threading
+    return threading.Lock()
+
+
 def coletor_para(nome: str) -> Coletor:
     """Um coletor por modo, criado no primeiro acesso e mantido para todos os visitantes."""
     reg = coletores()
-    vivo = getattr(reg.get(nome), "vivo", None)
-    if nome in reg and (vivo is None or not vivo()):   # coletor parado ou de versão antiga: cria outro
-        del reg[nome]
-    if nome not in reg:
-        cfg = MODOS[nome]
-        c = Coletor(cfg["eleicao"], db=DADOS / cfg["db"], base=cfg["base"],
-                    turno=2 if cfg["modo"] == "2t" else None)
-        c.iniciar_em_thread()
-        reg[nome] = c
+    with trava_coletores():   # vários visitantes ao mesmo tempo: um único coletor por fonte
+        vivo = getattr(reg.get(nome), "vivo", None)
+        if nome in reg and (vivo is None or not vivo()):   # coletor parado ou de versão antiga: cria outro
+            try:
+                reg[nome].parar()   # garante que a thread antiga não continue gravando
+            except Exception:  # noqa: BLE001
+                pass
+            del reg[nome]
+        if nome not in reg:
+            cfg = MODOS[nome]
+            c = Coletor(cfg["eleicao"], db=DADOS / cfg["db"], base=cfg["base"],
+                        turno=2 if cfg["modo"] == "2t" else None)
+            c.iniciar_em_thread()
+            reg[nome] = c
     return reg[nome]
 
 
