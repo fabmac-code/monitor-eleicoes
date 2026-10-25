@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 import time
@@ -103,6 +104,19 @@ DADOS = Path(os.environ.get("MONITOR_DADOS", Path(tempfile.gettempdir()) / "moni
 DADOS.mkdir(parents=True, exist_ok=True)
 
 
+from contextlib import contextmanager
+
+
+@contextmanager
+def leitor(c):
+    """Conexão própria e somente leitura para a tela (a do coletor é usada só pela thread dele)."""
+    con = sqlite3.connect(f"file:{c.db}?mode=ro", uri=True, timeout=15)
+    try:
+        yield con
+    finally:
+        con.close()
+
+
 @st.cache_resource
 def coletores() -> dict:
     return {}
@@ -163,7 +177,11 @@ with st.sidebar:
     st.markdown('<div class="passo">3 · Atualização</div>', unsafe_allow_html=True)
     with st.container(border=True):
         auto = st.toggle("Atualizar automaticamente", value=True, key="auto")
-        ultima = dict(col.con.execute("SELECT chave, valor FROM status").fetchall()).get("ultima_rodada")
+        try:
+            with leitor(col) as _c:
+                ultima = dict(_c.execute("SELECT chave, valor FROM status").fetchall()).get("ultima_rodada")
+        except sqlite3.Error:
+            ultima = None
         st.iframe(contador_html(ultima), height=46)
         buscar = st.button("Buscar agora", use_container_width=True, type="secondary" if auto else "primary")
     with st.expander("Como funciona a coleta"):
@@ -243,7 +261,15 @@ def boletim(dados: dict) -> str:
 
 @st.fragment(run_every=20)
 def painel():
-    con = col.con
+    chave_con = f"_ro_{col.db}"   # uma conexão de leitura por visitante e por banco, reaproveitada
+    con = st.session_state.get(chave_con)
+    if con is None:
+        try:
+            con = sqlite3.connect(f"file:{col.db}?mode=ro", uri=True, timeout=15, check_same_thread=False)
+        except sqlite3.Error as ex:
+            st.warning(f"Banco ocupado, tentando de novo em 20 s ({ex}).")
+            return
+        st.session_state[chave_con] = con
     status = dict(con.execute("SELECT chave, valor FROM status").fetchall())
     eleicao = col.eleicao  # só o que este coletor detectou (não reaproveita sessões antigas do banco)
     if not eleicao:
