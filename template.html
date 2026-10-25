@@ -329,7 +329,10 @@ function baseNac(){let bl=0,bf=0,bap=0,bco=0,bbn=0;for(const u in HB){bl+=HB[u][
 
 function kpis(){
   const br=D.ufs.BR, pst=br?br.pst:0, B=baseNac(), C=D.comp||{};
-  const L=rows.reduce((s,r)=>s+r.lv,0), F=rows.reduce((s,r)=>s+r.fv,0), lp=L+F?100*L/(L+F):NaN;
+  // parcial bruta nacional = arquivo BR oficial do TSE (às vezes à frente da soma dos arquivos por UF)
+  const sL=rows.reduce((s,r)=>s+r.lv,0), sF=rows.reduce((s,r)=>s+r.fv,0);
+  const L=br&&(br.lula+br.flavio)>0?br.lula:sL, F=br&&(br.lula+br.flavio)>0?br.flavio:sF, lp=L+F?100*L/(L+F):NaN;
+  const defas=(L+F)>0&&(sL+sF)<0.98*(L+F);
   const lead=L>=F?["Lula","pt"]:["Flávio","opp"], fech=rows.filter(r=>r.pst>=100).length;
   document.getElementById("kpis").innerHTML=`
    <div class="kpi"><span class="lbl">Seções totalizadas</span><span class="v">${pct(pst)}%</span>
@@ -337,16 +340,16 @@ function kpis(){
      <div class="duel" aria-hidden="true"><i style="width:${pst}%;background:var(--accent)"></i><i style="flex:1;background:var(--grid)"></i></div></div>
    <div class="kpi"><span class="lbl">Parcial bruta</span>
      <span class="v"><span class="pt">${pct(lp)}</span> <span style="color:var(--muted);font-size:1rem">×</span> <span class="opp">${pct(100-lp)}</span></span>
-     <span class="d"><span class="${lead[1]}">${lead[0]}</span> à frente por <span class="num">${fmt(Math.abs(L-F))}</span> votos</span>
-     <div class="duel" aria-hidden="true"><i style="width:${isNaN(lp)?50:lp}%;background:var(--pt)"></i><i style="flex:1;background:var(--opp)"></i></div></div>
+     <span class="d">${L+F?`<span class="${lead[1]}">${lead[0]}</span> à frente por <span class="num">${fmt(Math.abs(L-F))}</span> votos`:"aguardando os primeiros votos"}</span>
+     <div class="duel" aria-hidden="true"><i style="width:${isNaN(lp)?50:lp}%;background:var(--pt)"></i><i style="flex:1;background:var(--opp)"></i></div>${defas?`<span class="d" style="color:var(--warn)">Arquivos por UF do TSE ainda com ${pct(100*(sL+sF)/(L+F),0)}% desses votos: mapa, regiões e projeção usam só o que já saiu por UF.</span>`:""}</div>
    <div class="kpi hl"><span class="lbl">Projeção ajustada · Lula</span><span class="v pt">${pct(D.proj)}%</span>
      <span class="d">${D.proj==null?"aguardando dados":sgn(D.proj-lp,2)+" p.p. sobre a parcial bruta"}</span></div>
    <div class="kpi"><span class="lbl">Projeção × PT ${YL}</span><span class="v">${sgn(D.proj==null?NaN:D.proj-B.bp,2)} p.p.</span>
      <span class="d">${BASE_DESC[Y]}: PT com ${pct(B.bp)}% no final</span></div>
    <div class="kpi"><span class="lbl">Abstenção projetada</span><span class="v">${pct(C.abst_proj)}%</span>
-     <span class="d">${sgn(C.abst_proj-B.bab,2)} p.p. vs ${YL} (${pct(B.bab)}%) · parcial ${pct(C.abst_bruta)}%</span></div>
+     <span class="d">${sgn(C.abst_proj==null?NaN:C.abst_proj-B.bab,2)} p.p. vs ${YL} (${pct(B.bab)}%) · parcial ${pct(C.abst_bruta)}%</span></div>
    <div class="kpi"><span class="lbl">Brancos + nulos proj.</span><span class="v">${pct(C.bn_proj)}%</span>
-     <span class="d">${sgn(C.bn_proj-B.bbn,2)} p.p. vs ${YL} (${pct(B.bbn)}%) · % de quem votou</span></div>`;
+     <span class="d">${sgn(C.bn_proj==null?NaN:C.bn_proj-B.bbn,2)} p.p. vs ${YL} (${pct(B.bbn)}%) · % de quem votou</span></div>`;
 }
 
 function chart(el,s,keys,ref,refLbl,fmtV){
@@ -426,7 +429,7 @@ function table(){
     <td>${sgnV(r.dv)}</td><td>${pct(r.ab,1)}</td><td>${sgn(r.dab)}</td><td>${pct(r.bn,1)}</td><td>${sgn(r.dbn)}</td></tr>`).join("");
   const L=rows.reduce((a,r)=>a+r.lv,0),F=rows.reduce((a,r)=>a+r.fv,0),B=baseNac(),C=D.comp||{};
   const lp=L+F?100*L/(L+F):NaN;
-  document.querySelector("#tbl tfoot").innerHTML=`<tr><td class="ufc">Brasil (parcial bruta)</td><td>${pct(D.ufs.BR?D.ufs.BR.pst:0,1)}%</td><td>${fmt(L)}</td><td class="pt">${pct(lp)}</td><td>${fmt(F)}</td><td class="opp">${pct(100-lp)}</td><td>${pct(B.bp)}</td><td>${sgn(lp-B.bp)}</td><td>${sgnV(L-B.bl)}</td><td>${pct(C.abst_bruta,1)}</td><td>${sgn(C.abst_bruta-B.bab)}</td><td>${pct(C.bn_bruta,1)}</td><td>${sgn(C.bn_bruta-B.bbn)}</td></tr>`;
+  document.querySelector("#tbl tfoot").innerHTML=`<tr><td class="ufc">Brasil (parcial bruta)</td><td>${pct(D.ufs.BR?D.ufs.BR.pst:0,1)}%</td><td>${fmt(L)}</td><td class="pt">${pct(lp)}</td><td>${fmt(F)}</td><td class="opp">${pct(100-lp)}</td><td>${pct(B.bp)}</td><td>${sgn(lp-B.bp)}</td><td>${sgnV(L-B.bl)}</td><td>${pct(C.abst_bruta,1)}</td><td>${sgn(C.abst_bruta==null?NaN:C.abst_bruta-B.bab)}</td><td>${pct(C.bn_bruta,1)}</td><td>${sgn(C.bn_bruta==null?NaN:C.bn_bruta-B.bbn)}</td></tr>`;
   document.querySelectorAll("#tbl th").forEach(th=>th.setAttribute("aria-sort",th.dataset.k===k?(dir>0?"ascending":"descending"):"none"));
   document.getElementById("thBase").textContent=(IS1T?"Lula 1ºT":"PT "+Y)+" %";
 }
