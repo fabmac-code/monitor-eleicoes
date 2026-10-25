@@ -111,7 +111,8 @@ def coletores() -> dict:
 def coletor_para(nome: str) -> Coletor:
     """Um coletor por modo, criado no primeiro acesso e mantido para todos os visitantes."""
     reg = coletores()
-    if nome in reg and not reg[nome].vivo():   # coletor parou (ex.: erro no banco): cria outro
+    vivo = getattr(reg.get(nome), "vivo", None)
+    if nome in reg and (vivo is None or not vivo()):   # coletor parado ou de versão antiga: cria outro
         del reg[nome]
     if nome not in reg:
         cfg = MODOS[nome]
