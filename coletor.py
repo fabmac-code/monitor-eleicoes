@@ -137,6 +137,10 @@ def extrair(payload: dict) -> dict:
 # ---------------------------------------------------------------- banco
 def conectar(db: Path = DB) -> sqlite3.Connection:
     con = sqlite3.connect(db, check_same_thread=False, timeout=10)
+    try:
+        con.execute("PRAGMA journal_mode=WAL")  # leitura não bloqueia gravação
+    except sqlite3.Error:
+        pass
     con.execute("""CREATE TABLE IF NOT EXISTS leituras(
         coleta TEXT, eleicao TEXT, uf TEXT, pst REAL, secoes_tot INT, secoes INT,
         eleitores_tot INT, comparecimento INT, abstencao INT, validos INT, brancos INT,
@@ -186,6 +190,12 @@ class Coletor:
         self.db = db
         self.con = conectar(db)
         self.thread = None
+        import uuid
+        self.id = uuid.uuid4().hex
+        try:   # este coletor passa a ser o único dono do banco; os antigos se desligam sozinhos
+            set_status(self.con, dono=self.id)
+        except sqlite3.Error:
+            pass
         self._parar = threading.Event()
         self._agora = threading.Event()
         self.lm: dict[str, str] = {}
@@ -272,6 +282,13 @@ class Coletor:
     def loop(self, intervalo: int = INTERVALO):
         while not self._parar.is_set():
             t0 = time.time()
+            try:
+                dono = self.con.execute("SELECT valor FROM status WHERE chave='dono'").fetchone()
+                if dono and dono[0] != self.id:
+                    log.info("Outro coletor assumiu este banco; encerrando este.")
+                    break
+            except sqlite3.Error:
+                pass
             try:
                 self.rodada()
             except Exception as ex:  # noqa: BLE001
