@@ -29,6 +29,43 @@ from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("America/Sao_Paulo")  # o servidor na nuvem roda em UTC
 
+
+# --- Plano B de DNS --------------------------------------------------------------------------
+# Se o DNS do Windows falhar ao resolver *.tse.jus.br (erro "getaddrinfo failed"), o endereço é
+# obtido por DNS-over-HTTPS (Cloudflare 1.1.1.1 / Google 8.8.8.8, acessados por IP) e guardado em
+# memória. A conexão continua usando o nome do TSE (certificado HTTPS validado normalmente).
+import socket as _socket
+
+_getaddrinfo_original = _socket.getaddrinfo
+_DNS_CACHE: dict = {}
+
+
+def _resolver_doh(host: str) -> list:
+    for url in ("https://1.1.1.1/dns-query?name={}&type=A", "https://8.8.8.8/resolve?name={}&type=A"):
+        try:
+            r = requests.get(url.format(host), headers={"accept": "application/dns-json"}, timeout=5)
+            ips = [a["data"] for a in r.json().get("Answer", []) if a.get("type") == 1]
+            if ips:
+                return ips
+        except Exception:  # noqa: BLE001
+            continue
+    return []
+
+
+def _getaddrinfo_com_plano_b(host, *args, **kwargs):
+    try:
+        return _getaddrinfo_original(host, *args, **kwargs)
+    except _socket.gaierror:
+        if isinstance(host, str) and host.endswith("tse.jus.br"):
+            ips = _DNS_CACHE.get(host) or _resolver_doh(host)
+            if ips:
+                _DNS_CACHE[host] = ips
+                return _getaddrinfo_original(ips[0], *args, **kwargs)
+        raise
+
+
+_socket.getaddrinfo = _getaddrinfo_com_plano_b
+
 BASE = os.environ.get("MONITOR_BASE", "https://resultados.tse.jus.br").rstrip("/")
 AMBIENTE = "oficial"
 CICLO = "ele2026"
@@ -146,7 +183,9 @@ class Coletor:
         self.etags: dict[str, str] = {}
         self.eleicao = eleicao or os.environ.get("MONITOR_ELEICAO")
         self.nome_eleicao = ""
+        self.db = db
         self.con = conectar(db)
+        self.thread = None
         self._parar = threading.Event()
         self._agora = threading.Event()
         self.lm: dict[str, str] = {}
@@ -237,18 +276,30 @@ class Coletor:
                 self.rodada()
             except Exception as ex:  # noqa: BLE001
                 log.error("Falha na rodada: %s", ex)
-                set_status(self.con, erros=str(ex))
+                if isinstance(ex, sqlite3.Error):   # banco travado/somente leitura: reabre a conexão
+                    try:
+                        self.con = conectar(self.db)
+                    except Exception as ex2:  # noqa: BLE001
+                        log.error("Não reabriu o banco: %s", ex2)
+                try:
+                    set_status(self.con, erros=str(ex))
+                except Exception:  # noqa: BLE001 — nunca deixar a thread morrer
+                    pass
             self._agora.wait(max(1, intervalo - (time.time() - t0)))
             self._agora.clear()
 
     def iniciar_em_thread(self, intervalo: int = INTERVALO) -> threading.Thread:
         th = threading.Thread(target=self.loop, args=(intervalo,), daemon=True, name="coletor-tse")
         th.start()
+        self.thread = th
         return th
 
     def buscar_agora(self):
         """Antecipa a próxima rodada (botão "Buscar no TSE agora")."""
         self._agora.set()
+
+    def vivo(self) -> bool:
+        return self.thread is not None and self.thread.is_alive()
 
     def parar(self):
         self._parar.set()

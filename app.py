@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
+from pathlib import Path
 import time
 
 import streamlit as st
@@ -97,6 +99,10 @@ document.getElementById('b').style.width=(100*r/T)+'%';}},1000);</script>"""
 TEMPLATE = (PASTA / "template.html").read_text(encoding="utf-8")
 
 
+DADOS = Path(os.environ.get("MONITOR_DADOS", Path(tempfile.gettempdir()) / "monitor_eleicoes"))
+DADOS.mkdir(parents=True, exist_ok=True)
+
+
 @st.cache_resource
 def coletores() -> dict:
     return {}
@@ -105,9 +111,11 @@ def coletores() -> dict:
 def coletor_para(nome: str) -> Coletor:
     """Um coletor por modo, criado no primeiro acesso e mantido para todos os visitantes."""
     reg = coletores()
+    if nome in reg and not reg[nome].vivo():   # coletor parou (ex.: erro no banco): cria outro
+        del reg[nome]
     if nome not in reg:
         cfg = MODOS[nome]
-        c = Coletor(cfg["eleicao"], db=PASTA / cfg["db"], base=cfg["base"],
+        c = Coletor(cfg["eleicao"], db=DADOS / cfg["db"], base=cfg["base"],
                     turno=2 if cfg["modo"] == "2t" else None)
         c.iniciar_em_thread()
         reg[nome] = c
@@ -166,6 +174,61 @@ if buscar:
         st.toast("Busca no TSE disparada. O resultado aparece em alguns segundos.")
 
 
+
+# --- Boletim para WhatsApp --------------------------------------------------------------------
+REGIOES_BOL = [("Nordeste", "AL BA CE MA PB PE PI RN SE"), ("Sudeste", "ES MG RJ SP"), ("Sul", "PR RS SC"),
+               ("Norte", "AC AM AP PA RO RR TO"), ("Centro-Oeste", "DF GO MS MT")]
+LINK_APP = "https://monitor-2026.streamlit.app"
+
+
+def _n(x: float) -> str:
+    return f"{x:,.0f}".replace(",", ".")
+
+
+def _p(x: float, d: int = 1) -> str:
+    return f"{x:.{d}f}".replace(".", ",")
+
+
+def boletim(dados: dict) -> str:
+    """Texto curto, em formatação do WhatsApp (*negrito*, _itálico_), a partir dos dados do painel."""
+    ufs = dados.get("ufs", {})
+    br = ufs.get("BR", {})
+    hora = (dados.get("status", {}).get("ultima_rodada") or "")[11:16]
+    pst = float(br.get("pst") or 0)
+    L, F = br.get("lula", 0), br.get("flavio", 0)
+    linhas = ["*Apuração 2º turno · Presidente*", f"_Atualizado às {hora} · {_p(pst, 2)}% das seções apuradas_", ""]
+    if L + F == 0:
+        linhas += ["A apuração ainda não começou. O TSE divulga a partir das 17h.", "", f"Acompanhe: {LINK_APP}"]
+        return "\n".join(linhas)
+    lp = 100 * L / (L + F)
+    lider, dif = ("Lula", L - F) if L >= F else ("Flávio", F - L)
+    linhas += [f"Lula: *{_p(lp, 2)}%* ({_n(L)} votos)",
+               f"Flávio: *{_p(100 - lp, 2)}%* ({_n(F)} votos)",
+               f"Vantagem: {lider} +{_n(dif)}", ""]
+    proj = dados.get("proj")
+    if proj is not None and pst < 99.5:
+        linhas += [f"*Projeção ajustada:* Lula {_p(proj)}% × Flávio {_p(100 - proj)}%",
+                   "_Estimativa que corrige a ordem de chegada das urnas por estado. Não é resultado oficial._", ""]
+    linhas.append("*Por região* (Lula × Flávio · apurado)")
+    for nome, siglas in REGIOES_BOL:
+        l = sum(ufs.get(u, {}).get("lula", 0) for u in siglas.split())
+        f = sum(ufs.get(u, {}).get("flavio", 0) for u in siglas.split())
+        el = sum(ufs.get(u, {}).get("eleitores", 0) for u in siglas.split())
+        ap = sum(dados.get("aptos26", {}).get(u, 0) for u in siglas.split())
+        if l + f:
+            linhas.append(f"{nome}: {_p(100 * l / (l + f))}% × {_p(100 * f / (l + f))}% · {_p(100 * el / ap if ap else 0, 0)}%")
+        else:
+            linhas.append(f"{nome}: aguardando votos")
+    hist22 = dados.get("hist", {}).get("2022", {})
+    if hist22:
+        pl, pf = sum(v[4] for v in hist22.values()), sum(v[5] for v in hist22.values())
+        linhas += ["", f"Em 2022, Lula teve {_p(100 * pl / (pl + pf), 2)}% no 2º turno."]
+    ab = (dados.get("comp") or {}).get("abst_proj")
+    if ab is not None:
+        linhas.append(f"Abstenção projetada: {_p(ab)}% (2022: 20,6%)")
+    linhas += ["", f"Fonte: TSE · {LINK_APP}"]
+    return "\n".join(linhas)
+
 @st.fragment(run_every=20)
 def painel():
     con = col.con
@@ -198,7 +261,15 @@ def painel():
         dados = analise.montar_payload(con, eleicao, {**status, "ultima_rodada": ultimo})
         dados["ano"], dados["modo"] = ano, MODOS[nome]["modo"]
         html = (PASTA / "template.html").read_text(encoding="utf-8").replace("/*__DATA__*/null", json.dumps(dados, ensure_ascii=False, default=float))
-        st.session_state["painel_cache"] = cache = (assinatura, html)
+        st.session_state["painel_cache"] = cache = (assinatura, html, boletim(dados))
+    if len(cache) > 2 and cache[2]:
+        with st.expander("Boletim para WhatsApp", expanded=False):
+            try:
+                st.code(cache[2], language=None, wrap_lines=True)
+            except TypeError:  # Streamlit antigo, sem wrap_lines
+                st.code(cache[2], language=None)
+            st.caption("Clique no ícone de copiar (canto superior direito do quadro) e cole no WhatsApp. "
+                       "O texto acompanha a última atualização da tela.")
     if hasattr(st, "iframe"):            # Streamlit >= 1.52: st.iframe substitui components.html
         st.iframe(cache[1], height="content")
     else:
